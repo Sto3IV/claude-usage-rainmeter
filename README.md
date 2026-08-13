@@ -47,7 +47,7 @@ Size next to the Start button and a typical clock widget:
 2. Right-click the Rainmeter tray icon → **Refresh all**.
 3. Load **ClaudeUsage** from Manage.
 
-## Notes
+## How authentication works
 
 Uses the same local login as Claude Code (`CLAUDE_CODE_OAUTH_TOKEN`, or `%USERPROFILE%\.claude\.credentials.json`). Tokens stay there — they are not in the `.rmskin` or this repo.
 
@@ -64,13 +64,7 @@ py -3 tests/test_fetch.py
 py -3 scripts/package.py
 ```
 
-## Credits
+## Special thanks
 
-- Usage API contract: [bozdemir/claude-usage-widget](https://github.com/bozdemir/claude-usage-widget)
+- For inspiration: [bozdemir/claude-usage-widget](https://github.com/bozdemir/claude-usage-widget)
 - Panel artwork: **illustro** by poiru ([CC BY-NC-SA 3.0](https://creativecommons.org/licenses/by-nc-sa/3.0/))
-
-## License
-
-Code: [MIT](LICENSE) © Sto3IV.
-
-`Skins/ClaudeUsage/@Resources/Background.png`: © poiru / illustro, CC BY-NC-SA 3.0.
