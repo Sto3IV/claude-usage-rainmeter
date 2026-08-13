@@ -11,6 +11,16 @@ The package does **not** contain an API key or OAuth token. It cannot log into y
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Release](https://img.shields.io/github/v/release/Sto3IV/claude-usage-rainmeter)
 
+## Screenshots
+
+![Claude Usage widget](screenshots/widget.png)
+
+Size next to the Start button and a typical clock widget:
+
+![Widget next to Start / taskbar icons](screenshots/size-start.png)
+
+![Widget next to a clock](screenshots/size-clock.png)
+
 ## Requirements
 
 - Windows, [Rainmeter](https://www.rainmeter.net/) 4.5+
