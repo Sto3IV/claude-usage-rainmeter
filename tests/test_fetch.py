@@ -198,6 +198,8 @@ class SkinWiringTests(unittest.TestCase):
         self.assertIn("[Rainmeter]", ini)
         self.assertTrue(("fetch.py" in ini) or ("fetch.cmd" in ini), ini)
         self.assertIn("fetch.cmd", ini)
+        self.assertIn("Program=cmd", ini)
+        self.assertIn('Parameter=/c ""#@#fetch.cmd""', ini)
         self.assertIn("SessionUsed", ini)
         self.assertIn("WeeklyUsed", ini)
         lua = (RESOURCES / "parse.lua").read_text(encoding="utf-8")

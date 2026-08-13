@@ -16,7 +16,7 @@ It talks to the same `https://api.anthropic.com/api/oauth/usage` endpoint Claude
 
 ## Install
 
-1. Download `Claude_Usage_1.1.0.rmskin` from the [latest release](https://github.com/Sto3IV/claude-usage-rainmeter/releases/latest).
+1. Download the `.rmskin` from the [latest release](https://github.com/Sto3IV/claude-usage-rainmeter/releases/latest).
 2. Double-click it and press **Install**.
 3. Rainmeter loads `ClaudeUsage\ClaudeUsage.ini`. Drag it wherever you want.
 
