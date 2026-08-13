@@ -18,8 +18,8 @@ The package does **not** contain an API key or OAuth token. It cannot log into y
 Size next to the Start button and a typical clock widget:
 
 <p>
-<img src="screenshots/size-start.png" alt="Widget next to Start / taskbar icons" width="49%" />
-<img src="screenshots/size-clock.png" alt="Widget next to a clock" width="49%" />
+<img src="screenshots/compare-start.png" alt="Widget next to Start / taskbar icons" height="178" />
+<img src="screenshots/compare-clock.png" alt="Widget next to a clock" height="178" />
 </p>
 
 ## Requirements
