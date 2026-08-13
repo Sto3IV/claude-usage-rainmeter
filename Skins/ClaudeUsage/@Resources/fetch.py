@@ -47,22 +47,26 @@ def _normalize_iso(value: str) -> str:
     return text
 
 
-def format_countdown(resets_at: Any, now: Optional[datetime] = None) -> str:
+def iso_to_unix(resets_at: Any) -> int:
     if not isinstance(resets_at, str) or not resets_at.strip():
-        return "--"
+        return 0
     try:
         target = datetime.fromisoformat(_normalize_iso(resets_at))
     except (TypeError, ValueError):
-        return "--"
+        return 0
     if target.tzinfo is None:
         target = target.replace(tzinfo=timezone.utc)
-    clock = now or datetime.now(timezone.utc)
-    if clock.tzinfo is None:
-        clock = clock.replace(tzinfo=timezone.utc)
-    seconds = int((target - clock).total_seconds())
-    if seconds <= 0:
+    return int(target.timestamp())
+
+
+def format_countdown_seconds(seconds: Any) -> str:
+    try:
+        remaining = int(seconds)
+    except (TypeError, ValueError):
+        return "--"
+    if remaining <= 0:
         return "now"
-    days, rem = divmod(seconds, 86400)
+    days, rem = divmod(remaining, 86400)
     hours, rem = divmod(rem, 3600)
     minutes, _ = divmod(rem, 60)
     if days > 0:
@@ -72,6 +76,16 @@ def format_countdown(resets_at: Any, now: Optional[datetime] = None) -> str:
     if minutes > 0:
         return f"{minutes}m"
     return "<1m"
+
+
+def format_countdown(resets_at: Any, now: Optional[datetime] = None) -> str:
+    unix = iso_to_unix(resets_at)
+    if unix <= 0:
+        return "--"
+    clock = now or datetime.now(timezone.utc)
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=timezone.utc)
+    return format_countdown_seconds(unix - int(clock.timestamp()))
 
 
 def load_token(
@@ -151,6 +165,8 @@ def parse_usage(payload: Any, now: Optional[datetime] = None) -> dict[str, Any]:
         "weekly_reset": format_countdown(seven.get("resets_at"), now=now),
         "session_resets_at": five.get("resets_at") or "",
         "weekly_resets_at": seven.get("resets_at") or "",
+        "session_reset_unix": iso_to_unix(five.get("resets_at")),
+        "weekly_reset_unix": iso_to_unix(seven.get("resets_at")),
         "error": "",
     }
 

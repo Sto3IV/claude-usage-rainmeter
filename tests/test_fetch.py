@@ -64,6 +64,14 @@ class CountdownTests(unittest.TestCase):
         self.assertEqual(fetch.format_countdown("", now=now), "--")
         self.assertEqual(fetch.format_countdown(None, now=now), "--")
 
+    def test_iso_to_unix_and_seconds_formatter(self) -> None:
+        unix = fetch.iso_to_unix("2099-01-01T12:00:00+00:00")
+        self.assertEqual(unix, int(datetime(2099, 1, 1, 12, 0, tzinfo=timezone.utc).timestamp()))
+        self.assertEqual(fetch.format_countdown_seconds(2 * 3600), "2h")
+        self.assertEqual(fetch.format_countdown_seconds(2 * 86400 + 14 * 3600), "2d 14h")
+        self.assertEqual(fetch.format_countdown_seconds(45 * 60), "45m")
+        self.assertEqual(fetch.format_countdown_seconds(0), "now")
+
 
 class ParseValidPayloadTests(unittest.TestCase):
     def test_valid_five_hour_and_seven_day_fixture(self) -> None:
@@ -93,6 +101,14 @@ class ParseValidPayloadTests(unittest.TestCase):
         )
         self.assertEqual(snapshot["session_reset"], "2h")
         self.assertEqual(snapshot["weekly_reset"], "2d 14h")
+        self.assertEqual(
+            snapshot["session_reset_unix"],
+            fetch.iso_to_unix(payload["five_hour"]["resets_at"]),
+        )
+        self.assertEqual(
+            snapshot["weekly_reset_unix"],
+            fetch.iso_to_unix(payload["seven_day"]["resets_at"]),
+        )
 
 
 class FailurePathTests(unittest.TestCase):
@@ -209,9 +225,14 @@ class SkinWiringTests(unittest.TestCase):
         self.assertIn("SessionReset", ini)
         self.assertIn("WeeklyReset", ini)
         self.assertIn("#Error#", ini)
-        self.assertIn("UpdateDivider=60", ini)
         self.assertIn("MeasureFetch", ini)
+        self.assertIn("FETCH_EVERY = 60", lua)
+        self.assertIn("TickCountdowns", lua)
         self.assertIn("Plugin=RunCommand", ini)
+        self.assertIn("[MeasureParse]", ini)
+        self.assertIn("UpdateDivider=1", ini)
+        self.assertNotIn("UpdateDivider=-1", ini)
+        self.assertNotIn("[MeasureTimer]", ini)
         self.assertIn("Background=#@#Background.png", ini)
         self.assertIn("BackgroundMode=3", ini)
         self.assertIn("BackgroundMargins=0,34,0,14", ini)
