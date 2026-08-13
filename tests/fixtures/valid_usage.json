@@ -1,0 +1,13 @@
+{
+  "five_hour": {
+    "utilization": 27.5,
+    "resets_at": "2099-01-01T12:00:00+00:00"
+  },
+  "seven_day": {
+    "utilization": 61.0,
+    "resets_at": "2099-01-04T00:00:00+00:00"
+  },
+  "extra_usage": {
+    "is_enabled": false
+  }
+}
