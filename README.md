@@ -49,11 +49,21 @@ Size next to the Start button and a typical clock widget:
 
 ## Notes
 
-The skin reads the same local login Claude Code already uses (`CLAUDE_CODE_OAUTH_TOKEN`, or `%USERPROFILE%\.claude\.credentials.json`). Nothing is bundled in the `.rmskin`.
+The skin reads the same local login Claude Code already uses (`CLAUDE_CODE_OAUTH_TOKEN`, or `%USERPROFILE%\.claude\.credentials.json`).
 
 If you are not logged in, or the token has expired, the skin shows an error instead of a fake 0%. Re-run `claude` and refresh.
 
 The usage endpoint is shared with Claude Code. Don’t poll faster than once a minute or you’ll get rate-limited.
+
+## Privacy / what is not in this package
+
+The `.rmskin` and this repo do not contain:
+
+- OAuth access or refresh tokens
+- Anthropic API keys
+- A baked-in account path or Python install path
+
+At runtime the skin writes `@Resources/snapshot.json` with used/remaining percents and reset timestamps only. Delete that file anytime; the next poll recreates it. Tokens stay in Claude Code’s own credentials file on your machine.
 
 ## Building
 
