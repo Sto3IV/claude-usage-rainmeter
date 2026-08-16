@@ -1,4 +1,4 @@
-"""Claude Code 5h/7d usage fetch for the Rainmeter ClaudeUsage skin.
+"""Claude Code 5h/7d usage fetch for the Rainmeter AIUsageLimits/Claude skin.
 
 Token lookup matches bozdemir/claude-usage-widget:
   1. CLAUDE_CODE_OAUTH_TOKEN
@@ -64,8 +64,10 @@ def format_countdown_seconds(seconds: Any) -> str:
         remaining = int(seconds)
     except (TypeError, ValueError):
         return "--"
+    # An unreadable reset time and a window that already lapsed read the same to
+    # a user: nothing is counting down. parse.lua renders it identically.
     if remaining <= 0:
-        return "now"
+        return "--"
     days, rem = divmod(remaining, 86400)
     hours, rem = divmod(rem, 3600)
     minutes, _ = divmod(rem, 60)
@@ -179,7 +181,9 @@ def snapshot_from_http(
     if status == 401:
         return error_snapshot("Credentials expired -- re-authenticate with 'claude'")
     if status == 429:
-        return error_snapshot("Rate limited -- try again later")
+        # Kept short: the skin retries on its own now, and this string shares a
+        # 190px meter with a "(Nm old)" age suffix.
+        return error_snapshot("Rate limited")
     if status != 200:
         return error_snapshot(f"OAuth usage error {status}")
     if isinstance(body, (bytes, bytearray)):
@@ -219,9 +223,58 @@ def dump_snapshot(snapshot: Mapping[str, Any]) -> str:
 
 
 def write_snapshot(snapshot: Mapping[str, Any], path: os.PathLike[str] | str) -> None:
+    """Replace the snapshot atomically.
+
+    parse.lua polls this file every few seconds, and skins often live in a
+    synced folder, so a plain write can be caught half-flushed or blocked by a
+    sync lock. os.replace() is atomic on the same volume: readers see old or
+    new, never a half-written file.
+    """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(dump_snapshot(snapshot) + "\n", encoding="utf-8")
+    staging = target.with_name(target.name + ".tmp")
+    staging.write_text(dump_snapshot(snapshot) + "\n", encoding="utf-8")
+    os.replace(staging, target)
+
+
+def read_snapshot(path: os.PathLike[str] | str) -> Optional[dict[str, Any]]:
+    """Best-effort read of an existing snapshot. None if absent or unusable."""
+    try:
+        loaded = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def carry_forward(
+    fresh: Mapping[str, Any],
+    target: os.PathLike[str] | str,
+    now_unix: int,
+) -> dict[str, Any]:
+    """Keep the last good reading when a refresh fails.
+
+    /api/oauth/usage rejects sustained polling and answers 429 with
+    "Retry-After: 0", so failures are routine and carry no useful advice.
+    Overwriting good data with an error blanks the whole skin over a hiccup that
+    the next cycle would have fixed -- showing a number a few minutes old is far
+    better. Only report ok:false when there is nothing to fall back on.
+
+    fetched_at marks when the DATA was obtained; checked_at when we last tried.
+    """
+    if fresh.get("ok"):
+        return {**fresh, "fetched_at": now_unix, "checked_at": now_unix, "last_error": ""}
+
+    failure = fresh.get("error") or "Usage fetch failed"
+    previous = read_snapshot(target)
+    if previous is None or not previous.get("ok"):
+        return {
+            **fresh,
+            "fetched_at": now_unix,
+            "checked_at": now_unix,
+            "last_error": failure,
+        }
+    # Deliberately keeps the previous fetched_at: the data did not get any newer.
+    return {**previous, "checked_at": now_unix, "last_error": failure}
 
 
 def default_snapshot_path() -> Path:
@@ -237,8 +290,9 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
-    snapshot = build_snapshot(creds_path=args.creds)
     target = Path(args.out) if args.out else default_snapshot_path()
+    now_unix = int(datetime.now(timezone.utc).timestamp())
+    snapshot = carry_forward(build_snapshot(creds_path=args.creds), target, now_unix)
     write_snapshot(snapshot, target)
     sys.stdout.write(dump_snapshot(snapshot) + "\n")
     return 0

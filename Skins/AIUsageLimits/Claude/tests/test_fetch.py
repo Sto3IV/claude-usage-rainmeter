@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-SKIN_ROOT = Path(__file__).resolve().parents[1] / "Skins" / "ClaudeUsage"
-RESOURCES = SKIN_ROOT / "@Resources"
+SKIN_ROOT = Path(__file__).resolve().parents[1]
+RESOURCES = SKIN_ROOT.parent / "@Resources" / "Claude"
+SHARED_RESOURCES = SKIN_ROOT.parent / "@Resources"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 sys.path.insert(0, str(RESOURCES))
 
@@ -60,7 +62,7 @@ class CountdownTests(unittest.TestCase):
     def test_zulu_and_past_and_missing(self) -> None:
         now = datetime(2099, 1, 1, 10, 0, tzinfo=timezone.utc)
         self.assertEqual(fetch.format_countdown("2099-01-01T12:00:00Z", now=now), "2h")
-        self.assertEqual(fetch.format_countdown("2099-01-01T09:00:00+00:00", now=now), "now")
+        self.assertEqual(fetch.format_countdown("2099-01-01T09:00:00+00:00", now=now), "--")
         self.assertEqual(fetch.format_countdown("", now=now), "--")
         self.assertEqual(fetch.format_countdown(None, now=now), "--")
 
@@ -70,7 +72,8 @@ class CountdownTests(unittest.TestCase):
         self.assertEqual(fetch.format_countdown_seconds(2 * 3600), "2h")
         self.assertEqual(fetch.format_countdown_seconds(2 * 86400 + 14 * 3600), "2d 14h")
         self.assertEqual(fetch.format_countdown_seconds(45 * 60), "45m")
-        self.assertEqual(fetch.format_countdown_seconds(0), "now")
+        self.assertEqual(fetch.format_countdown_seconds(0), "--")
+        self.assertEqual(fetch.format_countdown_seconds(-9000), "--")
 
 
 class ParseValidPayloadTests(unittest.TestCase):
@@ -210,12 +213,12 @@ class TokenLookupTests(unittest.TestCase):
 
 class SkinWiringTests(unittest.TestCase):
     def test_ini_binds_required_fields_and_shipped_fetch(self) -> None:
-        ini = (SKIN_ROOT / "ClaudeUsage.ini").read_text(encoding="utf-8")
+        ini = (SKIN_ROOT / "Claude.ini").read_text(encoding="utf-8")
         self.assertIn("[Rainmeter]", ini)
         self.assertTrue(("fetch.py" in ini) or ("fetch.cmd" in ini), ini)
         self.assertIn("fetch.cmd", ini)
         self.assertIn("Program=cmd", ini)
-        self.assertIn('Parameter=/c ""#@#fetch.cmd""', ini)
+        self.assertIn('Parameter=/c ""#@#Claude\\fetch.cmd""', ini)
         self.assertIn("SessionUsed", ini)
         self.assertIn("WeeklyUsed", ini)
         lua = (RESOURCES / "parse.lua").read_text(encoding="utf-8")
@@ -226,7 +229,11 @@ class SkinWiringTests(unittest.TestCase):
         self.assertIn("WeeklyReset", ini)
         self.assertIn("#Error#", ini)
         self.assertIn("MeasureFetch", ini)
-        self.assertIn("FETCH_EVERY = 60", lua)
+        self.assertIn("FETCH_EVERY = 300", lua)
+        self.assertIn("APPLY_EVERY = 5", lua)
+        self.assertIn("FETCH_MAX", lua)
+        # The backoff must key off checked_at, not off every Apply() read.
+        self.assertIn("checkedAt ~= lastCheckedAt", lua)
         self.assertIn("TickCountdowns", lua)
         self.assertIn("Plugin=RunCommand", ini)
         self.assertIn("[MeasureParse]", ini)
@@ -238,8 +245,113 @@ class SkinWiringTests(unittest.TestCase):
         self.assertIn("BackgroundMargins=0,34,0,14", ini)
         self.assertNotIn("Skins\\illustro", ini)
         self.assertNotIn("illustro\\", ini)
-        self.assertTrue((RESOURCES / "Background.png").is_file())
+        self.assertTrue((SHARED_RESOURCES / "Background.png").is_file())
         self.assertTrue((RESOURCES / "fetch.cmd").is_file())
+        self.assertIn("ScriptFile=#@#Claude\\parse.lua", ini)
+
+    def test_runcommand_timeout_is_milliseconds_not_seconds(self) -> None:
+        """RunCommand's Timeout is MILLISECONDS, and State=Hide makes it KILL.
+
+        This shipped as Timeout=25, so Rainmeter killed cmd.exe 25ms after
+        launch -- far too early for it to even spawn Python. fetch.py never ran,
+        snapshot.json never changed, and the skin sat on day-old numbers while
+        FinishAction kept firing as though everything were healthy.
+        """
+        ini = (SKIN_ROOT / "Claude.ini").read_text(encoding="utf-8")
+        found = re.search(r"^Timeout=(\d+)", ini, re.MULTILINE)
+        self.assertIsNotNone(found, "MeasureFetch must set an explicit Timeout")
+        assert found is not None
+        self.assertGreaterEqual(
+            int(found.group(1)),
+            15000,
+            "Timeout is in milliseconds and must clear fetch.py's own 10s HTTP timeout",
+        )
+
+
+class CarryForwardTests(unittest.TestCase):
+    """A failed refresh must never blank a good reading.
+
+    /api/oauth/usage 429s readily. Before this, any rejection overwrote the
+    snapshot with a bare error object and the skin lost every value it had.
+    """
+
+    GOOD = {
+        "ok": True,
+        "session_used": 60.0,
+        "weekly_used": 16.0,
+        "session_reset_unix": 1786955399,
+        "error": "",
+        "fetched_at": 1000,
+        "checked_at": 1000,
+        "last_error": "",
+    }
+
+    def setUp(self) -> None:
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.target = Path(self._tmp.name) / "snapshot.json"
+
+    def _write(self, payload: dict) -> None:
+        self.target.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_failure_keeps_previous_values_and_fetched_at(self) -> None:
+        self._write(self.GOOD)
+        merged = fetch.carry_forward(fetch.error_snapshot("Rate limited"), self.target, 2000)
+
+        self.assertTrue(merged["ok"])
+        self.assertEqual(merged["session_used"], 60.0)
+        self.assertEqual(merged["weekly_used"], 16.0)
+        self.assertEqual(merged["session_reset_unix"], 1786955399)
+        self.assertEqual(merged["fetched_at"], 1000, "data did not get any newer")
+        self.assertEqual(merged["checked_at"], 2000, "but we did just try")
+        self.assertEqual(merged["last_error"], "Rate limited")
+
+    def test_success_stamps_both_and_clears_error(self) -> None:
+        self._write({**self.GOOD, "last_error": "Rate limited"})
+        fresh = {"ok": True, "session_used": 61.0, "weekly_used": 17.0, "error": ""}
+        merged = fetch.carry_forward(fresh, self.target, 3000)
+
+        self.assertEqual(merged["session_used"], 61.0)
+        self.assertEqual(merged["fetched_at"], 3000)
+        self.assertEqual(merged["checked_at"], 3000)
+        self.assertEqual(merged["last_error"], "")
+
+    def test_failure_without_usable_prior_stays_not_ok(self) -> None:
+        for label, prepare in (
+            ("missing file", lambda: None),
+            ("unparseable file", lambda: self.target.write_text("{oh no", encoding="utf-8")),
+            ("prior also failed", lambda: self._write({"ok": False, "error": "boom"})),
+            ("prior is not an object", lambda: self.target.write_text("[]", encoding="utf-8")),
+        ):
+            with self.subTest(prior=label):
+                if self.target.exists():
+                    self.target.unlink()
+                prepare()
+                merged = fetch.carry_forward(
+                    fetch.error_snapshot("Rate limited"), self.target, 4000
+                )
+                self.assertFalse(merged["ok"])
+                self.assertEqual(merged["last_error"], "Rate limited")
+                self.assertEqual(merged["checked_at"], 4000)
+                self.assertFalse(_has_remaining_zero(merged))
+
+    def test_round_trip_through_write_and_read(self) -> None:
+        fetch.write_snapshot(self.GOOD, self.target)
+        self.assertEqual(fetch.read_snapshot(self.target), self.GOOD)
+
+
+def local_identity() -> tuple[str, ...]:
+    """Markers for whoever is running this, derived at runtime.
+
+    Hardcoding a username would do the wrong thing twice: it would miss every
+    other contributor's paths, and it would publish the author's own account
+    name to anyone reading the repo. Short values are dropped so a two-letter
+    username cannot match half the tree.
+    """
+    candidates = [str(Path.home()), Path.home().name, os.environ.get("USERNAME", "")]
+    return tuple(m for m in dict.fromkeys(candidates) if len(m) >= 4)
 
 
 class SecretHygieneTests(unittest.TestCase):
@@ -249,13 +361,11 @@ class SecretHygieneTests(unittest.TestCase):
         "sk-ant" + "-",
         "oat01" + "-",
         "ort01" + "-",
-        "sato" + "_",
-        "C:\\Users\\" + "sato" + "_",
     )
 
     def test_tree_has_no_tokens_or_local_account_paths(self) -> None:
         hits: list[str] = []
-        shipped = [SKIN_ROOT / "ClaudeUsage.ini", *RESOURCES.iterdir()]
+        shipped = [SKIN_ROOT / "Claude.ini", *RESOURCES.iterdir()]
         for path in shipped:
             if not path.is_file():
                 continue
@@ -264,7 +374,7 @@ class SecretHygieneTests(unittest.TestCase):
             if path.suffix.lower() in {".png", ".bmp", ".jpg"}:
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
-            for needle in self.FORBIDDEN:
+            for needle in self.FORBIDDEN + local_identity():
                 if needle in text:
                     hits.append(f"{path}: {needle}")
         self.assertEqual(hits, [])
