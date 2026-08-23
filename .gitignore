@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+*.rmskin
+**/snapshot.json
+**/snapshot.json.tmp
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
