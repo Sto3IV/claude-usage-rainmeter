@@ -1,8 +1,16 @@
 """Grok SuperGrok weekly usage fetch for the Rainmeter AIUsageLimits/Grok skin.
 
 Token: ~/.grok/auth.json -> first entry .key (OIDC session).
-Primary: GET /billing?format=credits on the same hosts Grok CLI talks to.
+Primary: GET the CLI's own billing route, live on every call.
 Fallback: latest `billing: fetched credits config` line in ~/.grok/logs/unified.jsonl.
+That line is only rewritten when the CLI itself refetches billing -- at session
+start, not on a schedule -- so it can be hours old. It carries its own `ts`, which
+becomes fetched_at, so the bar ages it honestly instead of presenting a stale
+percent as current.
+
+A log line is never allowed to replace a newer snapshot. HTTP is the only source
+that moves with actual usage; one timeout used to rewind the panel to the last
+CLI scrape and clear last_error, which also reset the backoff.
 
 Weekly used = creditUsagePercent. Reset = currentPeriod.end / billingPeriodEnd.
 A failure is an explicit error, never a fake 0%.
@@ -17,21 +25,28 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+# The /v1 matters. grok.exe carries the path constant "/billing?format=credits" and
+# the API base "https://cli-chat-proxy.grok.com/v1"; this list used to join the two
+# without the base's suffix, so every live call 404'd and the log fallback silently
+# became the only source. Probed 2026-08-23 with no credentials attached, which is
+# enough to tell a missing route from a missing token: this URL answers 401 with a
+# JSON auth error naming x_xai_token_auth, while grok.com, grok.com/rest, api.x.ai,
+# api.x.ai/v1 and this same host without /v1 all answer 404.
+API_BASE = "https://cli-chat-proxy.grok.com/v1"
 BILLING_PATH = "/billing?format=credits"
-BILLING_URLS = (
-    "https://grok.com/billing?format=credits",
-    "https://code.grok.com/billing?format=credits",
-    "https://api.x.ai/billing?format=credits",
-    "https://cli-chat-proxy.grok.com/billing?format=credits",
-    "https://grok.com/rest/billing?format=credits",
-)
+BILLING_URLS = (API_BASE + BILLING_PATH,)
 DEFAULT_AUTH = Path.home() / ".grok" / "auth.json"
 DEFAULT_LOG = Path.home() / ".grok" / "logs" / "unified.jsonl"
 USER_AGENT = "rainmeter-grok-usage"
+# urlopen measured ~0.2s on a warm process. Rainmeter spawns a cold cmd+Python
+# under State=Hide with a 25s kill timer, and three fetchers can start together.
+# 3s was enough to lose the race and fall through to the log.
+HTTP_TIMEOUT = 8.0
+LOG_SCAN_CHUNK = 65536
 
 Opener = Callable[[str, Mapping[str, str], float], tuple[int, bytes]]
 
@@ -143,7 +158,9 @@ def _auth_headers(token: str, user_id: str = "") -> dict[str, str]:
     headers = {
         "Authorization": f"Bearer {token}",
         "X-XAI-Token-Auth": "xai-grok-cli",
-        "x-grok-client-version": "1.0.3",
+        # Tracks the installed CLI (the "ver" field on every unified.jsonl line).
+        # If the route starts refusing us over a version, this is the knob.
+        "x-grok-client-version": "1.0.5",
         "x-grok-client-identifier": "grok-shell",
         "x-grok-client-mode": "cli",
         "Accept": "application/json",
@@ -207,6 +224,26 @@ def snapshot_from_http(status: int, body: Any, now: Optional[datetime] = None) -
     return parse_billing(payload, now=now)
 
 
+def iter_lines_reversed(path: Path, chunk_size: int = LOG_SCAN_CHUNK) -> Iterator[str]:
+    """Yield JSONL lines newest-first without reading the whole file into RAM."""
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        remaining = handle.tell()
+        carry = b""
+        while remaining > 0:
+            take = min(chunk_size, remaining)
+            remaining -= take
+            handle.seek(remaining)
+            block = handle.read(take) + carry
+            parts = block.split(b"\n")
+            carry = parts[0]
+            for part in reversed(parts[1:]):
+                if part:
+                    yield part.decode("utf-8", errors="replace")
+        if carry:
+            yield carry.decode("utf-8", errors="replace")
+
+
 def read_log_billing(
     log_path: Optional[os.PathLike[str] | str] = None,
     now: Optional[datetime] = None,
@@ -215,27 +252,32 @@ def read_log_billing(
     if not path.is_file():
         return error_snapshot("No credentials found -- run 'grok login'")
     last: Optional[dict[str, Any]] = None
+    last_ts = ""
     try:
-        with path.open(encoding="utf-8", errors="replace") as handle:
-            lines = handle.readlines()
+        for line in iter_lines_reversed(path):
+            if "fetched credits config" not in line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            ctx = event.get("ctx")
+            if isinstance(ctx, dict):
+                last = ctx
+                ts = event.get("ts")
+                last_ts = ts if isinstance(ts, str) else ""
+                break
     except OSError:
         return error_snapshot("Could not read Grok billing log")
-    for line in reversed(lines):
-        if "fetched credits config" not in line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        ctx = event.get("ctx")
-        if isinstance(ctx, dict):
-            last = ctx
-            break
     if last is None:
         return error_snapshot("No Grok billing data in log -- open grok once")
     snap = parse_billing(last, now=now)
     if snap.get("ok"):
         snap["source"] = "log"
+        # When the CLI wrote the line, not when we read it. carry_forward() turns
+        # this into fetched_at; without it an hours-old line is stamped `now` and
+        # the bar's staleness indicator can never fire.
+        snap["data_ts"] = iso_to_unix(last_ts)
     return snap
 
 
@@ -243,7 +285,7 @@ def fetch_billing(
     token: str,
     user_id: str = "",
     opener: Optional[Opener] = None,
-    timeout: float = 10.0,
+    timeout: float = HTTP_TIMEOUT,
     urls: Optional[tuple[str, ...]] = None,
 ) -> tuple[int, bytes]:
     transport = opener or default_opener
@@ -269,30 +311,42 @@ def build_snapshot(
     log_path: Optional[os.PathLike[str] | str] = None,
     opener: Optional[Opener] = None,
     now: Optional[datetime] = None,
-    timeout: float = 3.0,
+    timeout: float = HTTP_TIMEOUT,
 ) -> dict[str, Any]:
-    logged = read_log_billing(log_path, now=now)
-    # Live /billing hosts 404. A hanging HTTP retry is longer than Rainmeter's
-    # RunCommand timeout, so the process is killed before snapshot.json is
-    # rewritten and the skin freezes on the last successful percent.
-    # Only probe HTTP when tests inject an opener, or when the log is empty.
-    try_http = opener is not None or not logged.get("ok")
+    # HTTP first: it is the only source that answers with the percent as it stands
+    # right now. The log only moves when the CLI itself refetches billing, so
+    # preferring it -- as this did while the URL was wrong -- renders an hours-old
+    # number with nothing to mark it as old. The log stays as the fallback: a real
+    # number carrying an honest age still beats a blank panel. A failed HTTP that
+    # then "succeeds" via the log still records last_error, so backoff fires and
+    # carry_forward can refuse to rewind a newer snapshot.
     entry = load_auth_entry(auth_path)
     token = load_token(auth_path)
     user_id = str((entry or {}).get("user_id") or "")
-    if try_http and token:
+    http_error = ""
+    if token:
         try:
             status, body = fetch_billing(token, user_id=user_id, opener=opener, timeout=timeout)
             live = snapshot_from_http(status, body, now=now)
             if live.get("ok"):
                 live["source"] = "http"
                 return live
-        except (URLError, OSError, TimeoutError, ValueError):
-            pass
+            http_error = str(live.get("error") or f"Grok billing error {status}")
+        except TimeoutError:
+            http_error = "Grok billing timed out"
+        except (URLError, OSError, ValueError):
+            http_error = "Grok billing request failed"
+    else:
+        http_error = "No credentials found -- run 'grok login'"
+    logged = read_log_billing(log_path, now=now)
     if logged.get("ok"):
+        if http_error:
+            logged["last_error"] = http_error
         return logged
     if not token:
         return error_snapshot("No credentials found -- run 'grok login'")
+    if http_error:
+        return error_snapshot(http_error)
     return logged if logged.get("error") else error_snapshot("Grok billing request failed")
 
 
@@ -336,9 +390,38 @@ def carry_forward(
     better. Only report ok:false when there is nothing to fall back on.
 
     fetched_at marks when the DATA was obtained; checked_at when we last tried.
+    A source that knows when its data was true says so in data_ts -- the log does,
+    and stamping `now` over it is exactly what let an hours-old percent pass for
+    current. Live HTTP omits it and keeps stamping now, which is correct for it.
+
+    An ok log line older than the snapshot is treated as a failed refresh, not a
+    new reading. The CLI log lags live usage; replacing HTTP with it rewinds the
+    percent and the stamp together.
     """
     if fresh.get("ok"):
-        return {**fresh, "fetched_at": now_unix, "checked_at": now_unix, "last_error": ""}
+        stamped = dict(fresh)
+        try:
+            obtained = int(stamped.pop("data_ts", 0) or 0)
+        except (TypeError, ValueError):
+            obtained = 0
+        if obtained <= 0:
+            obtained = now_unix
+        last_error = str(stamped.get("last_error") or "")
+        previous = read_snapshot(target)
+        if previous and previous.get("ok"):
+            try:
+                prev_fetched = int(previous.get("fetched_at") or 0)
+            except (TypeError, ValueError):
+                prev_fetched = 0
+            if prev_fetched > obtained:
+                kept = dict(previous)
+                kept["checked_at"] = now_unix
+                kept["last_error"] = last_error or str(kept.get("last_error") or "stale fallback")
+                return kept
+        stamped["fetched_at"] = obtained
+        stamped["checked_at"] = now_unix
+        stamped["last_error"] = last_error
+        return stamped
 
     failure = fresh.get("error") or "Usage fetch failed"
     previous = read_snapshot(target)

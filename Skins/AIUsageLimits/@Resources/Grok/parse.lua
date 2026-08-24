@@ -1,15 +1,18 @@
 -- Reads snapshot.json. Recalculates the weekly reset countdown every tick.
 
--- Stays at a minute: this one reads a local .jsonl in ~0.4s, so there is no
--- remote budget to spend and nothing to gain by slowing it down.
-FETCH_EVERY = 60
+-- Was 60 while fetch.py scraped a local .jsonl. It now queries cli-chat-proxy
+-- live on every run, so this matches the other two skins: that endpoint's rate
+-- limit is unmeasured and the backoff below is the only guard.
+FETCH_EVERY = 300
 
 -- Ceiling for the failure backoff.
 FETCH_MAX = 1800
 
 -- A window whose reset time already passed: check sooner for the next one,
--- rather than showing a lapsed window for a whole cycle.
-FETCH_LAPSED = 60
+-- rather than showing a lapsed window for a whole cycle. Used directly, not as
+-- a min(), so it is the actual cadence at the rollover -- 60 would have meant
+-- polling the live endpoint once a minute for as long as the window stayed over.
+FETCH_LAPSED = 120
 
 -- Re-read snapshot.json on a timer. FinishAction alone is not enough: if that
 -- bang is ever missed the skin would show stale numbers forever with no tell.
