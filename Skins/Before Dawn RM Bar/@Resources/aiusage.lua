@@ -52,6 +52,7 @@ function Initialize()
         -- -1 so the first Apply adopts the on-disk checked_at without arming the
         -- fetch timer, keeping the fetch-immediately-on-load behaviour.
         svc.lastCheckedAt = -1
+        svc.lastError = ""
         svc.shown = {}
         Apply(svc)
     end
@@ -266,11 +267,16 @@ function Tick(svc, now)
     end
     dirty = put(svc, "WeeklyReset", text) or dirty
 
-    -- The age suffix has to move on its own, not only when a fetch lands.
+    -- Age outranks a soft HTTP error: a 30-hour-old percent is the fact, the
+    -- timeout that kept it on screen is how we got there. A fresh reading with
+    -- last_error set is the other case -- HTTP died, log or previous snapshot
+    -- still showing -- and that used to render as a blank header until STALE_FLOOR.
     if svc.stampedAt and svc.stampedAt > 0 then
         local age = now - svc.stampedAt
         if age > math.max(svc.every * STALE_MULTIPLIER, STALE_FLOOR) then
             dirty = put(svc, "Status", format_age(age)) or dirty
+        elseif (svc.lastError or "") ~= "" then
+            dirty = put(svc, "Status", short_status(svc.lastError)) or dirty
         elseif not svc.hardError then
             dirty = put(svc, "Status", "") or dirty
         end
@@ -293,6 +299,7 @@ local function blank(svc, status)
     svc.sessionResetUnix = 0
     svc.weeklyResetUnix = 0
     svc.stampedAt = 0
+    svc.lastError = ""
     svc.hardError = true
     return dirty
 end
@@ -311,6 +318,7 @@ function Apply(svc)
 
     local dirty = false
     svc.hardError = false
+    svc.lastError = extract_string(raw, "last_error") or ""
 
     if svc.session then
         local used = extract_number(raw, "session_used")

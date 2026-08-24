@@ -67,11 +67,13 @@ countdown columns line up across all three panels without hand-padding.
 Countdowns tick every second regardless of fetch cadence — they are recomputed from the
 stored reset timestamp, not from what the fetcher last rendered.
 
-A failed refresh never blanks a panel. The last good reading stays, and the panel header
-picks up a muted age suffix (`1h old`, `2d old`) once that reading is genuinely stale, or a
-short status (`limited`, `no auth`, `expired`) when there is nothing to fall back on.
-Statuses are capped at seven characters — the header row is shared with a centred title and
-`ANTIGRAVITY` is wide enough that anything longer collides with it.
+A failed refresh never blanks a panel. The last good reading stays. The header shows a
+short status (`timeout`, `limited`, `expired`) when the live fetch failed and that reading
+is still on screen, then a muted age suffix (`1h old`, `2d old`) once it is genuinely stale.
+A hard miss with nothing to fall back on uses the same seven-character statuses
+(`no auth`, `offline`, `corrupt`). Statuses are capped at seven characters — the header
+row is shared with a centred title and `ANTIGRAVITY` is wide enough that anything longer
+collides with it.
 
 The panels carry no mouse actions, so there is no click-to-refresh — updates are automatic.
 To force one, run the service's `fetch.cmd` by hand; `aiusage.lua` re-reads the snapshots on
