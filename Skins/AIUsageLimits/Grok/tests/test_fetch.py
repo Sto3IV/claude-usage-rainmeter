@@ -455,6 +455,8 @@ class SkinWiringTests(unittest.TestCase):
         # The backoff must key off checked_at, not off every Apply() read.
         self.assertIn("checkedAt ~= lastCheckedAt", lua)
         self.assertIn('find("rate limit"', lua)
+        self.assertIn("rateLimited", lua)
+        self.assertIn('lastError == "" or rateLimited', lua)
         self.assertIn("weekly_used", lua)
         self.assertNotIn("session_used", lua)
         self.assertTrue((SHARED_RESOURCES / "Background.png").is_file())

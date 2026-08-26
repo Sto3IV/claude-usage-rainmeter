@@ -184,19 +184,24 @@ function UpdateHealth(raw)
         end
     end
 
-    -- Stay quiet about a failure the next cycle will fix: while the data is
-    -- still fresh, what is on screen is correct. Snapshots predating fetched_at
-    -- carry no stamp and skip the check rather than cry wolf.
+    -- 429 is expected and usually gone next cycle -- stay quiet while the
+    -- number on screen is still fresh. A 401/timeout is not: hiding it is
+    -- how a stale percent passed for current on the standalone widgets.
     local stampedAt = tonumber(extract_number(raw, "fetched_at")) or 0
     local age = (stampedAt > 0) and (os.time() - stampedAt) or 0
-    if age <= STALE_AFTER then
+    local rateLimited = lastError:lower():find("rate limit", 1, true)
+    if age <= STALE_AFTER and (lastError == "" or rateLimited) then
         SKIN:Bang("!SetVariable", "Error", "")
         SKIN:Bang("!SetVariable", "ErrorHidden", "1")
         return
     end
     local note
     if lastError ~= "" then
-        note = string.format("%s (%dm old)", lastError, math.floor(age / 60))
+        if age > STALE_AFTER then
+            note = string.format("%s (%dm old)", lastError, math.floor(age / 60))
+        else
+            note = lastError
+        end
     else
         note = string.format("Stale data -- last fetch %dm ago", math.floor(age / 60))
     end

@@ -238,6 +238,9 @@ class SkinWiringTests(unittest.TestCase):
         # expired token froze the bar on 73% for half an hour while the CLI
         # had already written a live token.
         self.assertIn('find("rate limit"', lua)
+        # 401 must not be swallowed by the "hide Error while fresh" return.
+        self.assertIn("rateLimited", lua)
+        self.assertIn('lastError == "" or rateLimited', lua)
         self.assertIn("TickCountdowns", lua)
         self.assertIn("Plugin=RunCommand", ini)
         self.assertIn("[MeasureParse]", ini)
