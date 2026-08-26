@@ -174,7 +174,10 @@ function UpdateHealth(raw)
             lastFetch = os.time()
         end
         lastCheckedAt = checkedAt
-        if lastError ~= "" then
+        -- Only 429 climbs the ladder. Other last_error values (timeout, 401)
+        -- retry at FETCH_EVERY; exponential backoff on those froze a live
+        -- source behind a hours-old snapshot.
+        if lastError:lower():find("rate limit", 1, true) then
             fetchBackoff = math.min(fetchBackoff * 2, FETCH_MAX)
         else
             fetchBackoff = FETCH_EVERY

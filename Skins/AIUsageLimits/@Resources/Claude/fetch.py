@@ -25,8 +25,17 @@ USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 BETA_HEADER = "oauth-2025-04-20"
 USER_AGENT = "rainmeter-claude-usage"
 DEFAULT_CREDS = Path.home() / ".claude" / ".credentials.json"
+# Public Claude Code OAuth client. Access tokens die while the refresh token
+# in ~/.claude/.credentials.json is still good; the CLI refreshes itself, this
+# fetcher did not, and a single 401 froze the panel on the last good percent.
+OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+OAUTH_TOKEN_URLS = (
+    "https://platform.claude.com/v1/oauth/token",
+    "https://console.anthropic.com/v1/oauth/token",
+)
 
 Opener = Callable[[str, Mapping[str, str], float], tuple[int, bytes]]
+Poster = Callable[[str, Mapping[str, str], float, bytes], tuple[int, bytes]]
 
 
 def clamp_pct(value: Any) -> float:
@@ -115,8 +124,7 @@ def error_snapshot(message: str) -> dict[str, Any]:
     return {"ok": False, "error": message}
 
 
-def default_opener(url: str, headers: Mapping[str, str], timeout: float) -> tuple[int, bytes]:
-    request = Request(url, headers=dict(headers), method="GET")
+def _http_exchange(request: Request, timeout: float) -> tuple[int, bytes]:
     try:
         with urlopen(request, timeout=timeout) as response:
             return int(response.getcode()), response.read(65536)
@@ -127,6 +135,106 @@ def default_opener(url: str, headers: Mapping[str, str], timeout: float) -> tupl
         except OSError:
             body = b""
         return int(exc.code), body
+
+
+def default_opener(url: str, headers: Mapping[str, str], timeout: float) -> tuple[int, bytes]:
+    return _http_exchange(Request(url, headers=dict(headers), method="GET"), timeout)
+
+
+def default_poster(
+    url: str, headers: Mapping[str, str], timeout: float, data: bytes
+) -> tuple[int, bytes]:
+    return _http_exchange(
+        Request(url, data=data, headers=dict(headers), method="POST"), timeout
+    )
+
+
+def _read_creds_blob(path: Path) -> Optional[dict[str, Any]]:
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    return blob if isinstance(blob, dict) else None
+
+
+def persist_oauth(creds_path: Path, oauth: Mapping[str, Any]) -> None:
+    """Write claudeAiOauth back without dropping sibling keys (mcpOAuth, …)."""
+    blob = _read_creds_blob(creds_path)
+    if blob is None:
+        blob = {}
+    blob["claudeAiOauth"] = dict(oauth)
+    staging = creds_path.with_name(creds_path.name + ".tmp")
+    staging.write_text(json.dumps(blob, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(staging, creds_path)
+
+
+def refresh_access_token(
+    creds_path: Optional[os.PathLike[str] | str] = None,
+    poster: Optional[Poster] = None,
+    timeout: float = 10.0,
+) -> Optional[str]:
+    """Exchange the stored refresh token. None if we cannot.
+
+    Does not raise on a failed refresh: the caller already has a 401 to report.
+    """
+    path = Path(creds_path) if creds_path is not None else DEFAULT_CREDS
+    blob = _read_creds_blob(path)
+    if not blob:
+        return None
+    oauth = blob.get("claudeAiOauth")
+    if not isinstance(oauth, dict):
+        return None
+    refresh = str(oauth.get("refreshToken") or "").strip()
+    if not refresh:
+        return None
+    payload = json.dumps(
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh,
+            "client_id": OAUTH_CLIENT_ID,
+        }
+    ).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": USER_AGENT,
+    }
+    transport = poster or default_poster
+    last_status, last_body = 0, b""
+    for url in OAUTH_TOKEN_URLS:
+        try:
+            last_status, last_body = transport(url, headers, timeout, payload)
+        except (URLError, OSError, TimeoutError, ValueError):
+            continue
+        if last_status == 200:
+            break
+    if last_status != 200:
+        return None
+    try:
+        data = json.loads(last_body.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    access = str(data.get("access_token") or "").strip()
+    if not access:
+        return None
+    updated = dict(oauth)
+    updated["accessToken"] = access
+    new_refresh = str(data.get("refresh_token") or "").strip()
+    if new_refresh:
+        updated["refreshToken"] = new_refresh
+    try:
+        expires_in = int(data.get("expires_in") or 0)
+    except (TypeError, ValueError):
+        expires_in = 0
+    if expires_in > 0:
+        updated["expiresAt"] = int(datetime.now(timezone.utc).timestamp() * 1000) + expires_in * 1000
+    try:
+        persist_oauth(path, updated)
+    except OSError:
+        pass
+    return access
 
 
 def fetch_usage(
@@ -205,16 +313,31 @@ def build_snapshot(
     env: Optional[Mapping[str, str]] = None,
     creds_path: Optional[os.PathLike[str] | str] = None,
     opener: Optional[Opener] = None,
+    poster: Optional[Poster] = None,
     now: Optional[datetime] = None,
     timeout: float = 10.0,
 ) -> dict[str, Any]:
-    token = load_token(env=env, creds_path=creds_path)
+    environ = os.environ if env is None else env
+    env_token = bool((environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip())
+    token = load_token(env=environ, creds_path=creds_path)
     if not token:
         return error_snapshot("No credentials found -- run 'claude' to log in")
     try:
         status, body = fetch_usage(token, opener=opener, timeout=timeout)
     except (URLError, OSError, TimeoutError, ValueError):
         return error_snapshot("OAuth usage request failed")
+    # An env token has no refresh handle we can rotate. File tokens do: the
+    # CLI already stores refreshToken, and a 401 here is usually expiry, not
+    # a missing login.
+    if status == 401 and not env_token:
+        refreshed = refresh_access_token(
+            creds_path=creds_path, poster=poster, timeout=timeout
+        )
+        if refreshed:
+            try:
+                status, body = fetch_usage(refreshed, opener=opener, timeout=timeout)
+            except (URLError, OSError, TimeoutError, ValueError):
+                return error_snapshot("OAuth usage request failed")
     return snapshot_from_http(status, body, now=now)
 
 

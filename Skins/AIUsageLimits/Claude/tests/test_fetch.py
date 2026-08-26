@@ -234,6 +234,10 @@ class SkinWiringTests(unittest.TestCase):
         self.assertIn("FETCH_MAX", lua)
         # The backoff must key off checked_at, not off every Apply() read.
         self.assertIn("checkedAt ~= lastCheckedAt", lua)
+        # 401 / "Credentials expired" must NOT climb the 429 ladder. One
+        # expired token froze the bar on 73% for half an hour while the CLI
+        # had already written a live token.
+        self.assertIn('find("rate limit"', lua)
         self.assertIn("TickCountdowns", lua)
         self.assertIn("Plugin=RunCommand", ini)
         self.assertIn("[MeasureParse]", ini)
@@ -340,6 +344,117 @@ class CarryForwardTests(unittest.TestCase):
     def test_round_trip_through_write_and_read(self) -> None:
         fetch.write_snapshot(self.GOOD, self.target)
         self.assertEqual(fetch.read_snapshot(self.target), self.GOOD)
+
+
+class OAuthRefreshTests(unittest.TestCase):
+    """A 401 is usually an expired access token, not a missing login."""
+
+    def setUp(self) -> None:
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.creds = Path(self._tmp.name) / "credentials.json"
+        self.creds.write_text(
+            json.dumps(
+                {
+                    "mcpOAuth": {"keep": True},
+                    "claudeAiOauth": {
+                        "accessToken": "old-access",
+                        "refreshToken": "old-refresh",
+                        "expiresAt": 1,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.usage = json.dumps(
+            {
+                "five_hour": {
+                    "utilization": 100,
+                    "resets_at": "2099-01-01T12:00:00+00:00",
+                },
+                "seven_day": {
+                    "utilization": 62,
+                    "resets_at": "2099-01-04T00:00:00+00:00",
+                },
+            }
+        ).encode()
+
+    def test_401_retries_after_refresh(self) -> None:
+        gets = {"n": 0}
+
+        def opener(url, headers, timeout):
+            gets["n"] += 1
+            if gets["n"] == 1:
+                return 401, b"{}"
+            auth = headers.get("Authorization") or ""
+            self.assertTrue(auth.endswith("new-access"), auth)
+            return 200, self.usage
+
+        def poster(url, headers, timeout, data):
+            payload = json.loads(data.decode("utf-8"))
+            self.assertEqual(payload["grant_type"], "refresh_token")
+            self.assertEqual(payload["refresh_token"], "old-refresh")
+            self.assertIn("/v1/oauth/token", url)
+            return 200, json.dumps(
+                {
+                    "access_token": "new-access",
+                    "refresh_token": "new-refresh",
+                    "expires_in": 3600,
+                }
+            ).encode()
+
+        snap = fetch.build_snapshot(
+            env={},
+            creds_path=self.creds,
+            opener=opener,
+            poster=poster,
+            now=datetime(2099, 1, 1, 10, 0, tzinfo=timezone.utc),
+        )
+        self.assertTrue(snap["ok"])
+        self.assertEqual(snap["session_used"], 100.0)
+        self.assertEqual(snap["weekly_used"], 62.0)
+        self.assertEqual(gets["n"], 2)
+        stored = json.loads(self.creds.read_text(encoding="utf-8"))
+        self.assertEqual(stored["claudeAiOauth"]["accessToken"], "new-access")
+        self.assertEqual(stored["claudeAiOauth"]["refreshToken"], "new-refresh")
+        self.assertTrue(stored["mcpOAuth"]["keep"], "sibling keys must survive write-back")
+
+    def test_401_without_refresh_token_stays_expired(self) -> None:
+        self.creds.write_text(
+            json.dumps({"claudeAiOauth": {"accessToken": "old-access"}}),
+            encoding="utf-8",
+        )
+
+        def opener(url, headers, timeout):
+            return 401, b"{}"
+
+        def poster(url, headers, timeout, data):
+            raise AssertionError("must not POST without a refresh token")
+
+        snap = fetch.build_snapshot(
+            env={}, creds_path=self.creds, opener=opener, poster=poster
+        )
+        self.assertFalse(snap["ok"])
+        self.assertIn("expired", snap["error"].lower())
+
+    def test_env_token_does_not_touch_the_file(self) -> None:
+        def opener(url, headers, timeout):
+            return 401, b"{}"
+
+        def poster(url, headers, timeout, data):
+            raise AssertionError("env token has no file refresh handle")
+
+        snap = fetch.build_snapshot(
+            env={"CLAUDE_CODE_OAUTH_TOKEN": "env-only"},
+            creds_path=self.creds,
+            opener=opener,
+            poster=poster,
+        )
+        self.assertFalse(snap["ok"])
+        stored = json.loads(self.creds.read_text(encoding="utf-8"))
+        self.assertEqual(stored["claudeAiOauth"]["accessToken"], "old-access")
 
 
 def local_identity() -> tuple[str, ...]:

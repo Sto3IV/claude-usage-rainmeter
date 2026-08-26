@@ -258,6 +258,7 @@ class SkinWiringTests(unittest.TestCase):
         self.assertIn("FETCH_MAX", lua)
         # The backoff must key off checked_at, not off every Apply() read.
         self.assertIn("checkedAt ~= lastCheckedAt", lua)
+        self.assertIn('find("rate limit"', lua)
         self.assertIn("TickCountdowns", lua)
         self.assertIn("Plugin=RunCommand", ini)
         self.assertIn("UpdateDivider=1", ini)

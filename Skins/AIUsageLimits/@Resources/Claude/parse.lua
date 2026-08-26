@@ -193,7 +193,10 @@ function UpdateHealth(raw)
             lastFetch = os.time()
         end
         lastCheckedAt = checkedAt
-        if lastError ~= "" then
+        -- Only 429 climbs the ladder. A 401 froze the bar on a stale percent
+        -- because the CLI had already written a live token and we waited out
+        -- FETCH_MAX before reading it.
+        if lastError:lower():find("rate limit", 1, true) then
             fetchBackoff = math.min(fetchBackoff * 2, FETCH_MAX)
         else
             fetchBackoff = FETCH_EVERY
