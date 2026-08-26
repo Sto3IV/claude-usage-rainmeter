@@ -352,7 +352,11 @@ function Apply(svc)
             svc.lastFetch = os.time()
         end
         svc.lastCheckedAt = checkedAt
-        if (extract_string(raw, "last_error") or "") ~= "" then
+        -- Only 429 climbs the ladder. A 401 froze Claude on 73% for half an
+        -- hour while the CLI had already written a live token: last_error
+        -- stayed "Credentials expired" and backoff ran out to FETCH_MAX.
+        local lastError = (extract_string(raw, "last_error") or ""):lower()
+        if lastError:find("rate limit", 1, true) then
             svc.backoff = math.min(svc.backoff * 2, FETCH_MAX)
         else
             svc.backoff = svc.every
