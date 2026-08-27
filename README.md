@@ -80,11 +80,11 @@ The Claude usage endpoint is shared with Claude Code itself and it is stricter t
 
 So the skins:
 
-- fetch every **5 minutes** by default. Grok used to poll every 60 s while it scraped a local log; it now hits the same live billing route the CLI uses, so it shares the 5-minute cadence. A failed HTTP call may fall back to that log, but it cannot replace a newer snapshot with an older line.
-- double the interval on failure, up to 30 minutes, and snap back on the first success
+- fetch Claude every **2 minutes**. Grok and Antigravity stay on **5 minutes**. Grok used to poll every 60 s while it scraped a local log; it now hits the same live billing route the CLI uses, so it keeps the 5-minute cadence. A failed HTTP call may fall back to that log, but it cannot replace a newer snapshot with an older line.
+- double the interval on a 429, up to 30 minutes, and snap back on the first success
 - keep showing the last good reading throughout, because the countdown is computed locally and does not need a fresh fetch to stay correct
 
-If you shorten `FETCH_EVERY` in `parse.lua`, expect 429s.
+If you shorten Claude below 2 minutes, expect 429s.
 
 ## Building
 

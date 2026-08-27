@@ -229,7 +229,7 @@ class SkinWiringTests(unittest.TestCase):
         self.assertIn("WeeklyReset", ini)
         self.assertIn("#Error#", ini)
         self.assertIn("MeasureFetch", ini)
-        self.assertIn("FETCH_EVERY = 300", lua)
+        self.assertIn("FETCH_EVERY = 120", lua)
         self.assertIn("APPLY_EVERY = 5", lua)
         self.assertIn("FETCH_MAX", lua)
         # The backoff must key off checked_at, not off every Apply() read.

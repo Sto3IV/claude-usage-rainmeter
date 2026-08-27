@@ -1,11 +1,12 @@
 -- Reads snapshot.json. Recalculates reset countdowns every tick from epoch.
--- Triggers the shipped fetch.cmd about once a minute.
+-- Triggers the shipped fetch.cmd about once every two minutes.
 
 -- /api/oauth/usage refuses sustained polling: at one request per minute it
 -- rejected three of every four. The countdowns are recomputed locally every
--- second regardless, so only the percentages depend on this, and they move
--- slowly enough that five minutes costs nothing.
-FETCH_EVERY = 300
+-- second regardless; percentages on a busy session move tens of points in a
+-- few minutes, so this is 2 minutes. 429 still doubles fetchBackoff up to
+-- FETCH_MAX.
+FETCH_EVERY = 120
 
 -- Ceiling for the failure backoff.
 FETCH_MAX = 1800
