@@ -10,7 +10,8 @@ panels inline, instead of running them as three floating widgets.
 Fixed 1200×262. System graphs on the left, the three usage panels in the middle, clock and
 date on the right. One Lua script (`@Resources/aiusage.lua`) drives all three panels: it
 reads the snapshots, recomputes every reset countdown locally each second, and schedules
-each service's fetcher on its own timer.
+each service's fetcher on its own timer — **Claude every 2 min**, **Antigravity every 5 min**,
+**Grok every 5 min**.
 
 > **This branch has its own history.** It is not a change to `main` — `main` ships the
 > three standalone widgets, this ships the bar that consumes them. There is no common
@@ -58,11 +59,11 @@ countdown columns line up across all three panels without hand-padding.
 
 ## What the panels show
 
-| Panel | Rows | Cadence |
+| Panel | Rows | Data refresh |
 | --- | --- | --- |
-| **Claude** | Session (5h) + Weekly (7d) | 120 s |
-| **Antigravity** | Session (5h) + Weekly (7d) | 300 s |
-| **Grok** | Weekly (7d) | 300 s |
+| **Claude** | Session (5h) + Weekly (7d) | every **2 min** |
+| **Antigravity** | Session (5h) + Weekly (7d) | every **5 min** |
+| **Grok** | Weekly (7d) | every **5 min** |
 
 Countdowns tick every second regardless of fetch cadence — they are recomputed from the
 stored reset timestamp, not from what the fetcher last rendered.
