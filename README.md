@@ -5,13 +5,13 @@ Small [illustro](https://docs.rainmeter.net/manual/installing-skins/)-style Rain
 [![GitHub release](https://img.shields.io/github/v/release/Sto3IV/claude-usage-rainmeter)](https://github.com/Sto3IV/claude-usage-rainmeter/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Each skin shows how much of your window you have used, plus a countdown to the next reset that ticks every second.
+Each skin shows how much of your window you have used, plus a countdown to the next reset that ticks every second. Percentages refresh on their own timer:
 
-| Skin | Shows | Source |
-| --- | --- | --- |
-| **Claude** | Session (5h) + Weekly (7d) used | `api.anthropic.com/api/oauth/usage` |
-| **Grok** | Weekly SuperGrok used | Grok CLI billing endpoint, falling back to its local log |
-| **Antigravity** | Session (5h) + Weekly (7d) Gemini quota | the local Antigravity language server |
+| Skin | Shows | Data refresh | Source |
+| --- | --- | --- | --- |
+| **Claude** | Session (5h) + Weekly (7d) used | every **2 min** | `api.anthropic.com/api/oauth/usage` |
+| **Grok** | Weekly SuperGrok used | every **5 min** | Grok CLI billing endpoint, falling back to its local log |
+| **Antigravity** | Session (5h) + Weekly (7d) Gemini quota | every **5 min** | the local Antigravity language server |
 
 Load whichever ones you use — they are independent and each can be positioned separately.
 
@@ -77,7 +77,7 @@ The Claude usage endpoint is shared with Claude Code itself and it is stricter t
 
 So the skins:
 
-- fetch Claude every **2 minutes**. Grok and Antigravity stay on **5 minutes**. Grok used to poll every 60 s while it scraped a local log; it now hits the same live billing route the CLI uses, so it keeps the 5-minute cadence. A failed HTTP call may fall back to that log, but it cannot replace a newer snapshot with an older line.
+- fetch on the per-skin timers above (Claude **2 min**, Grok and Antigravity **5 min**). Grok used to poll every 60 s while it scraped a local log; it now hits the same live billing route the CLI uses, so it keeps the 5-minute cadence. A failed HTTP call may fall back to that log, but it cannot replace a newer snapshot with an older line.
 - double the interval on a 429, up to 30 minutes, and snap back on the first success
 - keep showing the last good reading throughout, because the countdown is computed locally and does not need a fresh fetch to stay correct
 
