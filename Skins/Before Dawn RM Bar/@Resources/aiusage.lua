@@ -8,19 +8,21 @@
 -- exactly one copy of them. This script only reads.
 
 -- Claude's endpoint refuses sustained polling (at 1/min, three of four requests
--- came back 429, answering Retry-After: 0). Antigravity costs ~2.2s of
--- subprocess spawning per poll. Grok ran at 60s while it scraped a local log;
--- since its fetcher queries cli-chat-proxy live it shares the same cadence,
--- because that endpoint's rate limit is unmeasured and the backoff below is the
--- only thing standing between us and Claude's 429 story.
+-- came back 429, answering Retry-After: 0). Five minutes was the conservative
+-- floor after that measurement. Session utilization here moves tens of percent
+-- in a few minutes, so Claude is on 2 minutes and keeps the 429 backoff.
+-- Antigravity costs ~2.2s of subprocess spawning per poll. Grok hits
+-- cli-chat-proxy live; that endpoint's rate limit is unmeasured, so it stays
+-- on the 5-minute cadence with the same backoff as the only guard.
+FETCH_EVERY_CLAUDE = 120
 FETCH_EVERY_REMOTE = 300
 
 -- Ceiling for the failure backoff.
 FETCH_MAX = 1800
 
 -- A window whose reset time already passed: check sooner for the next one, but
--- never faster than the service's own cadence. Taken as a min(), which now that
--- every service sits at 300 uniformly means a 300 -> 120 rush at the rollover.
+-- never faster than the service's own cadence. Taken as a min(), so Claude
+-- already at 120 does not rush further, and the others drop 300 -> 120.
 FETCH_LAPSED = 120
 
 -- Re-read the snapshots on a timer. A fetch landing is not the only way they
@@ -28,13 +30,14 @@ FETCH_LAPSED = 120
 APPLY_EVERY = 5
 
 -- Three missed cycles before the header admits the data is old, floored so that
--- lowering a cadence cannot make the header flash "3m old" over one hiccup. At
--- 300 the multiplier wins (900s) and the floor is currently inert.
+-- lowering a cadence cannot make the header flash "3m old" over one hiccup.
+-- Claude at 120 would trip at 360s; the 600s floor holds it. The others trip
+-- at 900s via the multiplier.
 STALE_MULTIPLIER = 3
 STALE_FLOOR = 600
 
 SERVICES = {
-    { prefix = "Claude", dir = "Claude",      measure = "MeasureFetchClaude", every = FETCH_EVERY_REMOTE, session = true  },
+    { prefix = "Claude", dir = "Claude",      measure = "MeasureFetchClaude", every = FETCH_EVERY_CLAUDE, session = true  },
     { prefix = "Anti",   dir = "Antigravity", measure = "MeasureFetchAnti",   every = FETCH_EVERY_REMOTE, session = true  },
     { prefix = "Grok",   dir = "Grok",        measure = "MeasureFetchGrok",   every = FETCH_EVERY_REMOTE, session = false },
 }
