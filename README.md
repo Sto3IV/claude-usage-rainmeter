@@ -5,7 +5,7 @@ panels inline, instead of running them as three floating widgets.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-![Before Dawn RM Bar](screenshots/bar.png)
+![Before Dawn RM Bar](screenshots/bar-1200.png)
 
 Fixed 1200×262. System graphs on the left, the three usage panels in the middle, clock and
 date on the right. One Lua script (`@Resources/aiusage.lua`) drives all three panels: it
@@ -60,7 +60,7 @@ countdown columns line up across all three panels without hand-padding.
 
 | Panel | Rows | Cadence |
 | --- | --- | --- |
-| **Claude** | Session (5h) + Weekly (7d) | 300 s |
+| **Claude** | Session (5h) + Weekly (7d) | 120 s |
 | **Antigravity** | Session (5h) + Weekly (7d) | 300 s |
 | **Grok** | Weekly (7d) | 300 s |
 
