@@ -17,14 +17,11 @@ Load whichever ones you use — they are independent and each can be positioned 
 
 ## Screenshots
 
-![Claude Usage widget](screenshots/widget.png)
+![Claude, Antigravity and Grok standalone widgets](screenshots/widgets.png)
 
-Size next to the Start button and a typical clock widget:
+Claude and Antigravity are 210×144 (session + weekly). Grok is 210×94 (weekly only).
 
-<p>
-<img src="screenshots/compare-start.png" alt="Widget next to Start / taskbar icons" height="178" />
-<img src="screenshots/compare-clock.png" alt="Widget next to a clock" height="178" />
-</p>
+A single desktop bar that embeds all three panels lives on the [`before-dawn-bar`](https://github.com/Sto3IV/claude-usage-rainmeter/tree/before-dawn-bar) branch. Separate history — not a replacement for these skins.
 
 ## Features
 
