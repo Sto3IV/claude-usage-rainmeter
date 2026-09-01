@@ -61,6 +61,28 @@ function Initialize()
     end
 end
 
+-- RunCommand's number value is 0 while the process is alive. A second Run
+-- is error 101 and is dropped. Advancing lastFetch on the bang anyway made a
+-- stuck Hide process look "scheduled" -- Grok sat 22h on a dead percent until
+-- someone refreshed the skin. Kill the stuck process; Run on the next tick.
+local function fetch_is_running(name)
+    local measure = SKIN:GetMeasure(name)
+    if not measure then
+        return false
+    end
+    return measure:GetValue() == 0
+end
+
+local function start_fetch(svc, now)
+    if fetch_is_running(svc.measure) then
+        SKIN:Bang("!CommandMeasure", svc.measure, "Kill")
+        svc.lastFetch = 0
+        return
+    end
+    svc.lastFetch = now
+    SKIN:Bang("!CommandMeasure", svc.measure, "Run")
+end
+
 function Update()
     local now = os.time()
     local dirty = false
@@ -83,9 +105,14 @@ function Update()
         else
             every = svc.every
         end
-        if now - svc.lastFetch >= every then
-            svc.lastFetch = now
-            SKIN:Bang("!CommandMeasure", svc.measure, "Run")
+        local due = (now - svc.lastFetch >= every)
+        -- The bang was dropped or the process hung: snapshot.checked_at did
+        -- not move. Retry every APPLY_EVERY instead of waiting another `every`.
+        if (not due) and svc.lastCheckedAt >= 0 and (now - svc.lastCheckedAt) >= every then
+            due = (now - svc.lastFetch >= APPLY_EVERY)
+        end
+        if due then
+            start_fetch(svc, now)
         end
     end
     if dirty then
