@@ -36,6 +36,27 @@ function Initialize()
     Apply()
 end
 
+-- RunCommand's number value is 0 while the process is alive. A second Run
+-- is error 101 and is dropped. Advancing lastFetch on the bang anyway made a
+-- stuck Hide process look scheduled while snapshot.checked_at never moved.
+local function fetch_is_running()
+    local measure = SKIN:GetMeasure("MeasureFetch")
+    if not measure then
+        return false
+    end
+    return measure:GetValue() == 0
+end
+
+local function start_fetch(now)
+    if fetch_is_running() then
+        SKIN:Bang("!CommandMeasure", "MeasureFetch", "Kill")
+        lastFetch = 0
+        return
+    end
+    lastFetch = now
+    SKIN:Bang("!CommandMeasure", "MeasureFetch", "Run")
+end
+
 function Update()
     TickCountdowns()
     local now = os.time()
@@ -52,9 +73,12 @@ function Update()
     else
         every = FETCH_EVERY
     end
-    if now - lastFetch >= every then
-        lastFetch = now
-        SKIN:Bang("!CommandMeasure", "MeasureFetch", "Run")
+    local due = (now - lastFetch >= every)
+    if (not due) and lastCheckedAt >= 0 and (now - lastCheckedAt) >= every then
+        due = (now - lastFetch >= APPLY_EVERY)
+    end
+    if due then
+        start_fetch(now)
     end
     return 0
 end

@@ -464,6 +464,31 @@ class SkinWiringTests(unittest.TestCase):
         self.assertIn("Background=#@#Background.png", ini)
         self.assertIn("ScriptFile=#@#Grok\\parse.lua", ini)
 
+    def test_lua_kills_stuck_runcommand_instead_of_skipping_the_cycle(self) -> None:
+        """RunCommand error 101 drops a second Run; lastFetch used to advance anyway.
+
+        Grok then looked scheduled while snapshot.checked_at never moved, until
+        a skin refresh killed the hung Hide process. Kill first; retry if
+        checked_at is older than FETCH_EVERY.
+        """
+        lua = (RESOURCES / "parse.lua").read_text(encoding="utf-8")
+        self.assertIn('CommandMeasure", "MeasureFetch", "Kill"', lua)
+        self.assertIn("GetValue() == 0", lua)
+        self.assertIn("now - lastCheckedAt", lua)
+        self.assertIn("start_fetch", lua)
+        self.assertIn("lastFetch = 0", lua)
+
+    def test_bar_lua_unsticks_grok_when_runcommand_is_stuck(self) -> None:
+        bar = Path(r"E:\OneDrive\Documents\Rainmeter\Skins\Before Dawn RM Bar\@Resources\aiusage.lua")
+        if not bar.is_file():
+            self.skipTest("Before Dawn aiusage.lua not installed")
+        lua = bar.read_text(encoding="utf-8")
+        self.assertIn("MeasureFetchGrok", lua)
+        self.assertIn('CommandMeasure", svc.measure, "Kill"', lua)
+        self.assertIn("GetValue() == 0", lua)
+        self.assertIn("now - svc.lastCheckedAt", lua)
+        self.assertIn("start_fetch", lua)
+
     def test_fetch_cadence_is_remote_safe(self) -> None:
         """fetch.py stopped scraping a local log and now calls cli-chat-proxy.
 
