@@ -89,7 +89,7 @@ Everything positional lives in `[Variables]` at the top of `bar.ini`.
 | `BarWidth` / `BarHeight` | Overall size, 1200×262 |
 | `BgColor` / `BgMainAlpha` | Substrate, dark at 38/255 |
 | `SysX`, `SysRow1Y`, `SysRowH` | Left system block |
-| `AIX`, `AIWideW`, `AITopY`, `AITopH`, `AIGrokY`, `AIGrokH` | The three panels |
+| `AIX`, `AIX2`, `AIPanelW`, `AITopY`, `AITopH`, `AIGrokY`, `AIGrokH` | Claude / Antigravity / Grok (Grok is `#AIPanelW` under Claude) |
 | `ClockX`, `ClockY`, `ClockSize`, `DateY` | Right column, nudged independently of content |
 | `AIPanelBg`, `AIPanelEdge`, `AI*Accent` | Panel fill, hairline border, per-service bar colour |
 
