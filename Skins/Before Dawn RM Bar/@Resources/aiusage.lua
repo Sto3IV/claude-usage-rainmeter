@@ -351,8 +351,8 @@ function Apply(svc)
     svc.lastError = extract_string(raw, "last_error") or ""
 
     if svc.prefix == "DeepSeek" then
-        local usdText = extract_string(raw, "usd_text") or "$0.00"
-        local cnyText = extract_string(raw, "cny_text") or "¥0.00"
+        local usdText = extract_string(raw, "usd_text") or "0.00"
+        local cnyText = extract_string(raw, "cny_text") or "0.00"
         local usdSub = extract_string(raw, "usd_sub") or "--"
         local cnySub = extract_string(raw, "cny_sub") or "--"
         local usdBal = tonumber(extract_number(raw, "usd_balance")) or 0

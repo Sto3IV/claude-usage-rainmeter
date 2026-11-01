@@ -34,14 +34,14 @@ class ClampBalanceTests(unittest.TestCase):
 class ParseBalanceTests(unittest.TestCase):
     def test_valid_usd_fixture(self) -> None:
         payload = json.loads((FIXTURES / "valid_balance.json").read_text(encoding="utf-8"))
-        snapshot = fetch.parse_balance(payload, rate=6.67)
+        snapshot = fetch.parse_balance(payload)
         self.assertTrue(snapshot["ok"])
         self.assertEqual(snapshot["usd_balance"], 16.24)
-        self.assertEqual(snapshot["usd_text"], "$16.24")
+        self.assertEqual(snapshot["usd_text"], "16.24")
         self.assertEqual(snapshot["usd_sub"], "Top-up $16.24")
-        self.assertAlmostEqual(snapshot["cny_balance"], round(16.24 * 6.67, 2), places=2)
-        self.assertEqual(snapshot["cny_text"], f"¥{round(16.24 * 6.67, 2):.2f}")
-        self.assertEqual(snapshot["cny_sub"], "Rate ~6.67")
+        self.assertEqual(snapshot["cny_balance"], 0.0)
+        self.assertEqual(snapshot["cny_text"], "0.00")
+        self.assertEqual(snapshot["cny_sub"], "0.00")
 
     def test_dual_currency_payload(self) -> None:
         payload = {
@@ -51,12 +51,12 @@ class ParseBalanceTests(unittest.TestCase):
                 {"currency": "CNY", "total_balance": "70.00", "topped_up_balance": "70.00", "granted_balance": "0.00"},
             ],
         }
-        snapshot = fetch.parse_balance(payload, rate=6.67)
+        snapshot = fetch.parse_balance(payload)
         self.assertTrue(snapshot["ok"])
         self.assertEqual(snapshot["usd_balance"], 10.0)
-        self.assertEqual(snapshot["usd_text"], "$10.00")
+        self.assertEqual(snapshot["usd_text"], "10.00")
         self.assertEqual(snapshot["cny_balance"], 70.0)
-        self.assertEqual(snapshot["cny_text"], "¥70.00")
+        self.assertEqual(snapshot["cny_text"], "70.00")
 
     def test_cny_only_payload(self) -> None:
         payload = {
@@ -65,12 +65,12 @@ class ParseBalanceTests(unittest.TestCase):
                 {"currency": "CNY", "total_balance": "66.70", "topped_up_balance": "66.70", "granted_balance": "0.00"}
             ],
         }
-        snapshot = fetch.parse_balance(payload, rate=6.67)
+        snapshot = fetch.parse_balance(payload)
         self.assertTrue(snapshot["ok"])
         self.assertEqual(snapshot["cny_balance"], 66.70)
-        self.assertEqual(snapshot["usd_balance"], 10.00)
-        self.assertEqual(snapshot["usd_text"], "$10.00")
-        self.assertEqual(snapshot["cny_text"], "¥66.70")
+        self.assertEqual(snapshot["cny_text"], "66.70")
+        self.assertEqual(snapshot["usd_balance"], 0.0)
+        self.assertEqual(snapshot["usd_text"], "0.00")
 
     def test_missing_balance_infos(self) -> None:
         snapshot = fetch.parse_balance({"is_available": True})
@@ -121,35 +121,28 @@ class TokenLookupTests(unittest.TestCase):
 
 class CarryForwardTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.target = FIXTURES / "temp_snapshot.json"
         self.GOOD = {
             "ok": True,
             "is_available": True,
             "usd_balance": 16.24,
-            "usd_text": "$16.24",
+            "usd_text": "16.24",
             "usd_sub": "Top-up $16.24",
-            "cny_balance": 108.34,
-            "cny_text": "¥108.34",
-            "cny_sub": "Rate ~6.67",
-            "rate": 6.67,
+            "cny_balance": 0.0,
+            "cny_text": "0.00",
+            "cny_sub": "0.00",
             "error": "",
         }
 
-    def tearDown(self) -> None:
-        if self.target.exists():
-            self.target.unlink()
-
     def test_carry_forward_keeps_previous_on_failure(self) -> None:
-        self.target.write_text(json.dumps(self.GOOD), encoding="utf-8")
         failed = fetch.error_snapshot("HTTP error 500")
-        merged = fetch.carry_forward(failed, self.target, 2000)
+        merged = fetch.carry_forward(self.GOOD, failed, 2000)
         self.assertTrue(merged["ok"])
         self.assertEqual(merged["usd_balance"], 16.24)
         self.assertEqual(merged["last_error"], "HTTP error 500")
         self.assertEqual(merged["checked_at"], 2000)
 
     def test_success_updates_both_stamps(self) -> None:
-        merged = fetch.carry_forward(self.GOOD, self.target, 3000)
+        merged = fetch.carry_forward({}, self.GOOD, 3000)
         self.assertEqual(merged["fetched_at"], 3000)
         self.assertEqual(merged["checked_at"], 3000)
         self.assertEqual(merged["last_error"], "")
@@ -176,7 +169,8 @@ class SecretHygieneTests(unittest.TestCase):
                 continue
             if path.suffix.lower() in {".png", ".bmp", ".jpg"}:
                 continue
-            text = path.read_text(encoding="utf-8", errors="replace")
+            raw = path.read_bytes()
+            text = raw.decode("utf-16") if raw.startswith(b"\xff\xfe") else raw.decode("utf-8", errors="replace")
             for needle in self.FORBIDDEN + local_identity():
                 if needle in text:
                     hits.append(f"{path}: {needle}")
@@ -185,7 +179,8 @@ class SecretHygieneTests(unittest.TestCase):
 
 class SkinWiringTests(unittest.TestCase):
     def test_runcommand_timeout_is_milliseconds(self) -> None:
-        text = (SKIN_ROOT / "DeepSeek.ini").read_text(encoding="utf-8")
+        raw = (SKIN_ROOT / "DeepSeek.ini").read_bytes()
+        text = raw.decode("utf-16") if raw.startswith(b"\xff\xfe") else raw.decode("utf-8")
         self.assertIn("Timeout=25000", text)
         self.assertIn('Parameter=/c ""#@#DeepSeek\\fetch.cmd""', text)
 
