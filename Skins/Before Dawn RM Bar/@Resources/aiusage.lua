@@ -183,6 +183,34 @@ end
 
 -- The header has room for a few characters, not a sentence. "1390m ago" also
 -- reads as noise; at that range the hour is the only digit worth showing.
+local function format_ago(seconds)
+    seconds = tonumber(seconds)
+    if not seconds or seconds < 0 then
+        return "--"
+    end
+    if seconds < 60 then
+        return "<1m ago"
+    end
+    local days = math.floor(seconds / 86400)
+    local rem = seconds % 86400
+    local hours = math.floor(rem / 3600)
+    rem = rem % 3600
+    local minutes = math.floor(rem / 60)
+    if days > 0 then
+        if hours > 0 then
+            return string.format("%dd %dh ago", days, hours)
+        end
+        return string.format("%dd ago", days)
+    end
+    if hours > 0 then
+        if minutes > 0 then
+            return string.format("%dh %dm ago", hours, minutes)
+        end
+        return string.format("%dh ago", hours)
+    end
+    return string.format("%dm ago", minutes)
+end
+
 local function format_age(seconds)
     if seconds >= 86400 then
         return string.format("%dd old", math.floor(seconds / 86400))
@@ -286,6 +314,15 @@ function Tick(svc, now)
             text = format_countdown_seconds(left)
         end
         dirty = put(svc, "WeeklyReset", text) or dirty
+    else
+        local text = "--"
+        if svc.stampedAt and svc.stampedAt > 0 then
+            local age = now - svc.stampedAt
+            if age >= 0 then
+                text = format_ago(age)
+            end
+        end
+        dirty = put(svc, "Updated", text) or dirty
     end
 
     -- Age outranks a soft HTTP error: a 30-hour-old percent is the fact, the
@@ -311,8 +348,7 @@ local function blank(svc, status)
     if svc.prefix == "DeepSeek" then
         dirty = put(svc, "USDText", "--") or dirty
         dirty = put(svc, "CNYText", "--") or dirty
-        dirty = put(svc, "USDSub", "--") or dirty
-        dirty = put(svc, "CNYSub", "--") or dirty
+        dirty = put(svc, "Updated", "--") or dirty
         dirty = put(svc, "USD", "0") or dirty
         dirty = put(svc, "CNY", "0") or dirty
     else
@@ -353,15 +389,11 @@ function Apply(svc)
     if svc.prefix == "DeepSeek" then
         local usdText = extract_string(raw, "usd_text") or "0.00"
         local cnyText = extract_string(raw, "cny_text") or "0.00"
-        local usdSub = extract_string(raw, "usd_sub") or "--"
-        local cnySub = extract_string(raw, "cny_sub") or "--"
         local usdBal = tonumber(extract_number(raw, "usd_balance")) or 0
         local cnyBal = tonumber(extract_number(raw, "cny_balance")) or 0
 
         dirty = put(svc, "USDText", usdText) or dirty
         dirty = put(svc, "CNYText", cnyText) or dirty
-        dirty = put(svc, "USDSub", usdSub) or dirty
-        dirty = put(svc, "CNYSub", cnySub) or dirty
         dirty = put(svc, "USD", (usdBal > 0) and "100" or "0") or dirty
         dirty = put(svc, "CNY", (cnyBal > 0) and "100" or "0") or dirty
     else

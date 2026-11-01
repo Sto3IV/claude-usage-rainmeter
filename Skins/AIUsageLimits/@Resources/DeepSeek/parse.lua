@@ -1,3 +1,31 @@
+local function format_ago(seconds)
+    seconds = tonumber(seconds)
+    if not seconds or seconds < 0 then
+        return "--"
+    end
+    if seconds < 60 then
+        return "<1m ago"
+    end
+    local days = math.floor(seconds / 86400)
+    local rem = seconds % 86400
+    local hours = math.floor(rem / 3600)
+    rem = rem % 3600
+    local minutes = math.floor(rem / 60)
+    if days > 0 then
+        if hours > 0 then
+            return string.format("%dd %dh ago", days, hours)
+        end
+        return string.format("%dd ago", days)
+    end
+    if hours > 0 then
+        if minutes > 0 then
+            return string.format("%dh %dm ago", hours, minutes)
+        end
+        return string.format("%dh ago", hours)
+    end
+    return string.format("%dm ago", minutes)
+end
+
 -- Reads snapshot.json for DeepSeek API credits.
 -- Triggers the shipped fetch.cmd about once every five minutes.
 
@@ -12,6 +40,7 @@ function Initialize()
     lastApply = 0
     fetchBackoff = FETCH_EVERY
     lastCheckedAt = -1
+    stampedAt = 0
     Apply()
 end
 
@@ -37,6 +66,9 @@ function Update()
     local now = os.time()
     if now - lastApply >= APPLY_EVERY then
         Apply()
+    end
+    if stampedAt and stampedAt > 0 then
+        SKIN:Bang("!SetVariable", "Updated", format_ago(now - stampedAt))
     end
     local every = (fetchBackoff > FETCH_EVERY) and fetchBackoff or FETCH_EVERY
     local due = (now - lastFetch >= every)
@@ -94,14 +126,17 @@ function Apply()
 
     local usdText = extract_string(raw, "usd_text") or "0.00"
     local cnyText = extract_string(raw, "cny_text") or "0.00"
-    local usdSub = extract_string(raw, "usd_sub") or "--"
-    local cnySub = extract_string(raw, "cny_sub") or "--"
     local lastError = extract_string(raw, "last_error") or ""
+
+    stampedAt = tonumber(extract_number(raw, "fetched_at")) or 0
+    local updatedText = "--"
+    if stampedAt > 0 then
+        updatedText = format_ago(os.time() - stampedAt)
+    end
 
     SKIN:Bang("!SetVariable", "USDText", usdText)
     SKIN:Bang("!SetVariable", "CNYText", cnyText)
-    SKIN:Bang("!SetVariable", "USDSub", usdSub)
-    SKIN:Bang("!SetVariable", "CNYSub", cnySub)
+    SKIN:Bang("!SetVariable", "Updated", updatedText)
     SKIN:Bang("!SetVariable", "ErrorHidden", "1")
 
     local checkedAt = tonumber(extract_number(raw, "checked_at")) or 0
